@@ -205,14 +205,23 @@ public class MySqlDataManager {
                 player.setGameMode(GameMode.valueOf(String.valueOf(data.get("gamemode"))));
             }
             if(modules.syncHealth){
-                player.setHealth((Double) data.get("health"));
+                double healthToSet = (Double) data.get("health");
+                double maxHealth = player.getMaxHealth();
+                if(healthToSet > maxHealth){
+                    player.setHealth(maxHealth);
+                    if(Main.DEBUG){
+                        System.out.println("Player " + player.getName() + " health clamped from " + healthToSet + " to max health " + maxHealth);
+                    }
+                } else {
+                    player.setHealth(healthToSet);
+                }
             }
             if(modules.syncVaultEconomy){
                 Main.vaultManager.setBalance(player, (Double) data.get("money"));
             }
             if(modules.syncExp){
-                player.setExp((Float) data.get("exp"));
                 player.setLevel((Integer) data.get("exp_level"));
+                player.setExp((Float) data.get("exp"));
             }
             if(modules.syncLocation){
                 World world = Bukkit.getWorld((String) data.get("world"));
