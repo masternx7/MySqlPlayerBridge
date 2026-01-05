@@ -25,14 +25,22 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 
 public class MySqlDataManager {
     public final MySqlManager mySqlManager;
     public final boolean DEBUG = false;
+    
+    private final ConcurrentHashMap<UUID, ReentrantLock> playerLocks = new ConcurrentHashMap<>();
 
     public MySqlDataManager(MySqlManager manager){
         mySqlManager = manager;
+    }
+    
+    private ReentrantLock getPlayerLock(UUID uuid) {
+        return playerLocks.computeIfAbsent(uuid, k -> new ReentrantLock());
     }
 
     public boolean hasData(Player player){
@@ -49,7 +57,6 @@ public class MySqlDataManager {
     }
 
     public HashMap<String, Object> getCurrentData(Player player){
-        // Vielleicht Async machen ?? (wird wahrscheinlich schon async called)
 
         String gamemode = player.getGameMode().toString();
         int exp_level = player.getLevel();
@@ -117,23 +124,37 @@ public class MySqlDataManager {
     }
     
     public void savePlayerData(Player player, boolean async){
-        if(!this.hasData(player) && Main.config.getBoolean("settings.no-entry-protection")){ return; }
-        HashMap<String, Object> data = this.getCurrentData(player);
+        UUID uuid = player.getUniqueId();
+        ReentrantLock lock = getPlayerLock(uuid);
+        
+        lock.lock();
         try {
-            if(Main.DEBUG){
-                System.out.println("Attempting to save player data. Player: "+player.getName());
+            if(!this.hasData(player) && Main.config.getBoolean("settings.no-entry-protection")){ 
+                return; 
             }
-            this.mySqlManager.setOrUpdateEntry(Main.TABLE_NAME, Map.of("uuid", player.getUniqueId().toString()), data);
-        } catch (MySqlError e) {
-            new MySqlErrorHandler().savePlayerData(player, data);
-            throw new RuntimeException(e);
-        }
+            
+            HashMap<String, Object> data = this.getCurrentData(player);
+            try {
+                if(Main.DEBUG){
+                    System.out.println("Attempting to save player data. Player: "+player.getName());
+                }
+                this.mySqlManager.setOrUpdateEntry(Main.TABLE_NAME, Map.of("uuid", uuid.toString()), data);
+            } catch (MySqlError e) {
+                new MySqlErrorHandler().savePlayerData(player, data);
+                throw new RuntimeException(e);
+            }
 
-        Main.effectDataManager.savePlayer(player, async);
-        Main.advancementDataManager.savePlayer(player, async);
-        Main.statsDataManager.savePlayer(player, async);
-        Main.hotbarSlotSelectionDataManager.savePlayer(player, async);
-        Main.saturationDataManager.savePlayer(player, async);
+            Main.effectDataManager.savePlayer(player, async);
+            Main.advancementDataManager.savePlayer(player, async);
+            Main.statsDataManager.savePlayer(player, async);
+            Main.hotbarSlotSelectionDataManager.savePlayer(player, async);
+            Main.saturationDataManager.savePlayer(player, async);
+        } finally {
+            lock.unlock();
+            if (!lock.hasQueuedThreads() && !lock.isLocked()) {
+                playerLocks.remove(uuid);
+            }
+        }
     }
 
 
@@ -153,18 +174,23 @@ public class MySqlDataManager {
     public boolean checkDatabaseConnection(){ return Main.mySqlConnectionHandler.getMySQL().isConnectionAlive(); }
 
     public void applyDataToPlayer(Player player){
-        if(Main.DEBUG){
-            System.out.println("attempting to applyDataToPlayer player: "+player.getName());
-        }
-
-        HashMap<String, Object> data;
+        UUID uuid = player.getUniqueId();
+        ReentrantLock lock = getPlayerLock(uuid);
+        
+        lock.lock();
         try {
-            data = this.getPlayerDataFromDB(player);
-        } catch (NoPlayerDataException e) {
-            throw new RuntimeException(e);
-        }
+            if(Main.DEBUG){
+                System.out.println("attempting to applyDataToPlayer player: "+player.getName());
+            }
 
-        Scheduler.run(() -> {
+            HashMap<String, Object> data;
+            try {
+                data = this.getPlayerDataFromDB(player);
+            } catch (NoPlayerDataException e) {
+                throw new RuntimeException(e);
+            }
+
+            Scheduler.run(() -> {
             ModulesManager modules = Main.modulesManager;
 
             if(modules.syncInventory){
@@ -258,6 +284,13 @@ public class MySqlDataManager {
         Main.statsDataManager.applyPlayer(player);
         Main.hotbarSlotSelectionDataManager.applyPlayer(player);
         Main.saturationDataManager.applyPlayer(player);
+        
+        } finally {
+            lock.unlock();
+            if (!lock.hasQueuedThreads() && !lock.isLocked()) {
+                playerLocks.remove(uuid);
+            }
+        }
     }
 
     public void saveAllOnlinePlayers(){

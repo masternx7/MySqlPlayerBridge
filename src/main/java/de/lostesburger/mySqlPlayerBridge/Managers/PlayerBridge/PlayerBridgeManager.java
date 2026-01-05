@@ -12,8 +12,13 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
+
 public class PlayerBridgeManager implements Listener {
     private final MySqlDataManager mySqlDataManager;
+    private final ConcurrentHashMap<UUID, CompletableFuture<Void>> playerOperations = new ConcurrentHashMap<>();
 
     public PlayerBridgeManager(){
         Bukkit.getPluginManager().registerEvents(this, Main.getInstance());
@@ -24,23 +29,53 @@ public class PlayerBridgeManager implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlayerJoin(PlayerJoinEvent event){
         Player player = event.getPlayer();
+        UUID uuid = player.getUniqueId();
 
-        Scheduler.runAsync(() -> {
-            if(this.mySqlDataManager.hasData(player)){
-                this.mySqlDataManager.applyDataToPlayer(player);
-                Main.playerManager.sendDataLoadedMessage(player);
-            }else {
-                if(NoEntryProtection.isTriggered(player)) return;
-                this.mySqlDataManager.savePlayerData(player, true);
-                Main.playerManager.sendCreatedDataMessage(player);
+        CompletableFuture<Void> existingOp = playerOperations.get(uuid);
+        if (existingOp != null && !existingOp.isDone()) {
+            existingOp.cancel(true);
+        }
+
+        CompletableFuture<Void> operation = CompletableFuture.runAsync(() -> {
+            try {
+                if(this.mySqlDataManager.hasData(player)){
+                    this.mySqlDataManager.applyDataToPlayer(player);
+                    Main.playerManager.sendDataLoadedMessage(player);
+                }else {
+                    if(NoEntryProtection.isTriggered(player)) return;
+                    this.mySqlDataManager.savePlayerData(player, true);
+                    Main.playerManager.sendCreatedDataMessage(player);
+                }
+            } finally {
+                playerOperations.remove(uuid);
             }
-        }, Main.getInstance());
+        });
+
+        playerOperations.put(uuid, operation);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onPlayerLeave(PlayerQuitEvent event){
         Player player = event.getPlayer();
-        this.mySqlDataManager.savePlayerData(player, false);
+        UUID uuid = player.getUniqueId();
+
+        CompletableFuture<Void> existingOp = playerOperations.get(uuid);
+        if (existingOp != null && !existingOp.isDone()) {
+            try {
+                existingOp.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (Exception e) {
+                Main.getInstance().getLogger().warning("Failed to wait for player operation completion: " + player.getName());
+                if(Main.DEBUG) {
+                    e.printStackTrace();
+                }
+            }
+        }
+
+        try {
+            this.mySqlDataManager.savePlayerData(player, false);
+        } finally {
+            playerOperations.remove(uuid);
+        }
     }
 
     private void startAutoSyncTask(){
