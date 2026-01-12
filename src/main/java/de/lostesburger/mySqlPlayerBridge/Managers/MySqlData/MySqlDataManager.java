@@ -107,12 +107,26 @@ public class MySqlDataManager {
                     player.getInventory().getHelmet()
             });
 
+            if(serializedInventory == null || serializedInventory.isEmpty()) {
+                serializedInventory = "null";
+                if(Main.DEBUG) System.out.println("Warning: Inventory serialization resulted in empty/null");
+            }
+            if(serializedEnderChest == null || serializedEnderChest.isEmpty()) {
+                serializedEnderChest = "null";
+                if(Main.DEBUG) System.out.println("Warning: EnderChest serialization resulted in empty/null");
+            }
+            if(serializedArmor == null || serializedArmor.isEmpty()) {
+                serializedArmor = "null";
+                if(Main.DEBUG) System.out.println("Warning: Armor serialization resulted in empty/null");
+            }
+
             if(Main.DEBUG){
                 System.out.println("Inv: "+serializedInventory);
-                System.out.println("EnderChest"+serializedEnderChest);
+                System.out.println("EnderChest: "+serializedEnderChest);
                 System.out.println("Armor: "+serializedArmor);
             }
         } catch (Exception e) {
+            Main.getInstance().getLogger().warning("Failed to serialize player inventory for " + player.getName() + ": " + e.getMessage());
             throw new RuntimeException(e);
         }
 
@@ -133,17 +147,8 @@ public class MySqlDataManager {
                 return; 
             }
             
-            HashMap<String, Object> data = this.getCurrentData(player);
-            try {
-                if(Main.DEBUG){
-                    System.out.println("Attempting to save player data. Player: "+player.getName());
-                }
-                this.mySqlManager.setOrUpdateEntry(Main.TABLE_NAME, Map.of("uuid", uuid.toString()), data);
-            } catch (MySqlError e) {
-                new MySqlErrorHandler().savePlayerData(player, data);
-                throw new RuntimeException(e);
-            }
-
+            this.savePlayerDataWithRetry(player, 3);
+            
             Main.effectDataManager.savePlayer(player, async);
             Main.advancementDataManager.savePlayer(player, async);
             Main.statsDataManager.savePlayer(player, async);
@@ -154,6 +159,99 @@ public class MySqlDataManager {
             if (!lock.hasQueuedThreads() && !lock.isLocked()) {
                 playerLocks.remove(uuid);
             }
+        }
+    }
+    
+    private void savePlayerDataWithRetry(Player player, int maxRetries) {
+        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                HashMap<String, Object> data = this.getCurrentData(player);
+                if(Main.DEBUG){
+                    System.out.println("Attempting to save player data. Player: "+player.getName() + " (Attempt " + attempt + "/" + maxRetries + ")");
+                    logDataSizes(player, data);
+                }
+                
+                verifyDataIntegrity(player, data);
+                this.mySqlManager.setOrUpdateEntry(Main.TABLE_NAME, Map.of("uuid", player.getUniqueId().toString()), data);
+                
+                verifyDataWasSaved(player, data);
+                
+                if(Main.DEBUG && attempt > 1) {
+                    System.out.println("Successfully saved player data on retry: " + player.getName());
+                }
+                return;
+                
+            } catch (MySqlError e) {
+                if (attempt == maxRetries) {
+                    new MySqlErrorHandler().savePlayerData(player, this.getCurrentData(player));
+                    throw new RuntimeException("Failed to save player data after " + maxRetries + " attempts", e);
+                }
+                
+                try {
+                    Thread.sleep(100 * attempt);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted during save retry", ie);
+                }
+            }
+        }
+    }
+    
+    private void logDataSizes(Player player, HashMap<String, Object> data) {
+        String inv = String.valueOf(data.get("inventory"));
+        String ender = String.valueOf(data.get("enderchest"));
+        String armor = String.valueOf(data.get("armor"));
+        
+        System.out.println("[DATA SIZE] " + player.getName() + 
+            " - Inv: " + (inv == null ? 0 : inv.length()) + " bytes, " +
+            "EnderChest: " + (ender == null ? 0 : ender.length()) + " bytes, " +
+            "Armor: " + (armor == null ? 0 : armor.length()) + " bytes");
+    }
+    
+    private void verifyDataIntegrity(Player player, HashMap<String, Object> data) {
+        final long MAX_FIELD_SIZE = 16777215;
+        
+        String inv = String.valueOf(data.get("inventory"));
+        String ender = String.valueOf(data.get("enderchest"));
+        String armor = String.valueOf(data.get("armor"));
+        
+        if(inv.length() > MAX_FIELD_SIZE) {
+            Main.getInstance().getLogger().warning("Inventory data for " + player.getName() + " exceeds max size: " + inv.length() + " bytes");
+        }
+        if(ender.length() > MAX_FIELD_SIZE) {
+            Main.getInstance().getLogger().warning("EnderChest data for " + player.getName() + " exceeds max size: " + ender.length() + " bytes");
+        }
+        if(armor.length() > MAX_FIELD_SIZE) {
+            Main.getInstance().getLogger().warning("Armor data for " + player.getName() + " exceeds max size: " + armor.length() + " bytes");
+        }
+    }
+    
+    private void verifyDataWasSaved(Player player, HashMap<String, Object> data) throws MySqlError {
+        try {
+            Map<String, Object> savedData = this.mySqlManager.getEntry(Main.TABLE_NAME, 
+                Map.of("uuid", player.getUniqueId().toString()));
+            
+            if(savedData == null || savedData.isEmpty()) {
+                throw new MySqlError("Saved data is empty or null");
+            }
+            
+            String savedInv = String.valueOf(savedData.get("inventory"));
+            String expectedInv = String.valueOf(data.get("inventory"));
+            
+            if(savedInv.length() < expectedInv.length() && !expectedInv.equals("null")) {
+                Main.getInstance().getLogger().warning("WARNING: Inventory data was truncated for " + player.getName() + 
+                    " Expected: " + expectedInv.length() + " bytes, Got: " + savedInv.length() + " bytes");
+                throw new MySqlError("Data truncation detected - inventory");
+            }
+            
+            if(Main.DEBUG) {
+                System.out.println("Data verification passed for " + player.getName());
+            }
+        } catch (MySqlError e) {
+            if(Main.DEBUG) {
+                System.out.println("Failed to verify saved data for " + player.getName() + ": " + e.getMessage());
+            }
+            throw e;
         }
     }
 
@@ -198,10 +296,18 @@ public class MySqlDataManager {
                     if(Main.nbtSerializer == null){
                         throw new NBTSerializationException("nbtserializer not loaded", null);
                     }
-                    player.getInventory().setContents(Main.nbtSerializer.deserialize(String.valueOf(data.get("inventory"))));
+                    String invData = String.valueOf(data.get("inventory"));
+                    if(invData != null && !invData.equals("null")) {
+                        ItemStack[] items = Main.nbtSerializer.deserialize(invData);
+                        if(items != null && items.length > 0) {
+                            player.getInventory().setContents(items);
+                        } else {
+                            Main.getInstance().getLogger().warning("Failed to deserialize inventory for " + player.getName() + ": items array is empty");
+                        }
+                    }
                 } catch (Exception e) {
-                    player.kickPlayer(Chat.getMessage("sync-failed"));
-                    throw new RuntimeException(e);
+                    Main.getInstance().getLogger().warning("Failed to apply inventory for " + player.getName() + ": " + e.getMessage());
+                    if(Main.DEBUG) e.printStackTrace();
                 }
 
             }
@@ -210,10 +316,18 @@ public class MySqlDataManager {
                     if(Main.nbtSerializer == null){
                         throw new NBTSerializationException("nbtserializer not loaded", null);
                     }
-                    player.getEnderChest().setContents(Main.nbtSerializer.deserialize(String.valueOf(data.get("enderchest"))));
+                    String chestData = String.valueOf(data.get("enderchest"));
+                    if(chestData != null && !chestData.equals("null")) {
+                        ItemStack[] items = Main.nbtSerializer.deserialize(chestData);
+                        if(items != null && items.length > 0) {
+                            player.getEnderChest().setContents(items);
+                        } else {
+                            Main.getInstance().getLogger().warning("Failed to deserialize enderchest for " + player.getName() + ": items array is empty");
+                        }
+                    }
                 } catch (Exception e) {
-                    player.kickPlayer(Chat.getMessage("sync-failed"));
-                    throw new RuntimeException(e);
+                    Main.getInstance().getLogger().warning("Failed to apply enderchest for " + player.getName() + ": " + e.getMessage());
+                    if(Main.DEBUG) e.printStackTrace();
                 }
             }
             if(modules.syncArmorSlots){
@@ -221,10 +335,18 @@ public class MySqlDataManager {
                     if(Main.nbtSerializer == null){
                         throw new NBTSerializationException("nbtserializer not loaded", null);
                     }
-                    player.getInventory().setArmorContents(Main.nbtSerializer.deserialize(String.valueOf(data.get("armor"))));
+                    String armorData = String.valueOf(data.get("armor"));
+                    if(armorData != null && !armorData.equals("null")) {
+                        ItemStack[] items = Main.nbtSerializer.deserialize(armorData);
+                        if(items != null && items.length > 0) {
+                            player.getInventory().setArmorContents(items);
+                        } else {
+                            Main.getInstance().getLogger().warning("Failed to deserialize armor for " + player.getName() + ": items array is empty");
+                        }
+                    }
                 } catch (Exception e) {
-                    player.kickPlayer(Chat.getMessage("sync-failed"));
-                    throw new RuntimeException(e);
+                    Main.getInstance().getLogger().warning("Failed to apply armor for " + player.getName() + ": " + e.getMessage());
+                    if(Main.DEBUG) e.printStackTrace();
                 }
             }
             if(modules.syncGamemode){
@@ -279,11 +401,27 @@ public class MySqlDataManager {
 
         }, Main.getInstance());
 
+        try {
+            Thread.sleep(100);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
+        long timeout = System.currentTimeMillis() + 10000;
         Main.effectDataManager.applyPlayer(player);
         Main.advancementDataManager.applyPlayer(player);
         Main.statsDataManager.applyPlayer(player);
         Main.hotbarSlotSelectionDataManager.applyPlayer(player);
         Main.saturationDataManager.applyPlayer(player);
+        
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            if(Main.DEBUG) {
+                System.out.println("Interrupted while waiting for sync managers: " + player.getName());
+            }
+            Thread.currentThread().interrupt();
+        }
         
         } finally {
             lock.unlock();
