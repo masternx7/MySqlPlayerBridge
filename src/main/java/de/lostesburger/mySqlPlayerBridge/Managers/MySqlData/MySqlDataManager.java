@@ -42,7 +42,7 @@ public class MySqlDataManager {
     public void savePlayerData(Player player, boolean async, boolean criticalSave) {
         UUID uuid = player.getUniqueId();
 
-        long lockTimeout = criticalSave ? 30000 : 15000;
+        long lockTimeout = async ? 3000 : (criticalSave ? 10000 : 5000);
         if (!PlayerSyncLockManager.tryLock(uuid, lockTimeout)) {
             if (Main.DEBUG) {
                 System.out.println("[MySqlDataManager] Failed to acquire lock for save: " + player.getName());
@@ -206,6 +206,6 @@ public class MySqlDataManager {
     }
 
     public void savePlayerDataCritical(Player player) {
-        savePlayerData(player, false, true);
+        savePlayerData(player, true, true);
     }
 }

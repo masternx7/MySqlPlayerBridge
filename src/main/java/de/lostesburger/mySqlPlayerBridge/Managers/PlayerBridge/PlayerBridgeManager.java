@@ -67,28 +67,34 @@ public class PlayerBridgeManager implements Listener {
         UUID uuid = player.getUniqueId();
 
         if (Main.DEBUG) {
-            System.out.println("[PlayerBridge] Player leaving, critical save: " + player.getName());
+            System.out.println("[PlayerBridge] Player leaving, async save: " + player.getName());
         }
 
-        try {
-            this.mySqlDataManager.savePlayerDataCritical(player);
+        Scheduler.runAsync(() -> {
+            try {
+                this.mySqlDataManager.savePlayerDataCritical(player);
 
-            if (PlayerSyncLockManager.hasIncompleteAsyncOperations(uuid)) {
-                System.err.println("[PlayerBridge] WARNING: Waiting for incomplete operations: " + player.getName());
-                try {
-                    PlayerSyncLockManager.waitForSaveConfirmation(uuid, 5000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    System.err.println(
-                            "[PlayerBridge] Interrupted while waiting for save confirmation: " + player.getName());
+                if (PlayerSyncLockManager.hasIncompleteAsyncOperations(uuid)) {
+                    if (Main.DEBUG) {
+                        Main.getInstance().getLogger()
+                                .info("[PlayerBridge] Waiting for incomplete operations: " + player.getName());
+                    }
+                    try {
+                        PlayerSyncLockManager.waitForSaveConfirmation(uuid, 5000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        Main.getInstance().getLogger()
+                                .warning("[PlayerBridge] Interrupted while waiting for save confirmation: "
+                                        + player.getName());
+                    }
+                }
+            } finally {
+                PlayerSyncLockManager.cleanup(uuid);
+                if (Main.DEBUG) {
+                    System.out.println("[PlayerBridge] Cleanup completed: " + player.getName());
                 }
             }
-        } finally {
-            PlayerSyncLockManager.cleanup(uuid);
-            if (Main.DEBUG) {
-                System.out.println("[PlayerBridge] Cleanup completed: " + player.getName());
-            }
-        }
+        }, Main.getInstance());
     }
 
     private void startAutoSyncTask() {

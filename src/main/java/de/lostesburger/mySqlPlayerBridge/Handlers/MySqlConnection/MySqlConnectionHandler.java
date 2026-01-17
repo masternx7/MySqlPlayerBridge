@@ -6,122 +6,149 @@ import de.craftcore.craftcore.global.mysql.MySqlManager;
 import de.lostesburger.mySqlPlayerBridge.Handlers.Errors.MySqlErrorHandler;
 import de.lostesburger.mySqlPlayerBridge.Main;
 import de.lostesburger.mySqlPlayerBridge.Managers.MySqlData.MySqlDataManager;
-
+import org.bukkit.configuration.file.FileConfiguration;
 
 public class MySqlConnectionHandler {
-    private final MySQL mySQL;
-    private final MySqlManager mySqlManager;
-    private final MySqlDataManager mySqlDataManager;
+        private final MySQL mySQL;
+        private final MySqlManager mySqlManager;
+        private final MySqlDataManager mySqlDataManager;
+        private HikariCPHandler hikariCPHandler;
 
-    public MySqlConnectionHandler(String host, int port, String database, String username, String password) {
-        try {
-            this.mySQL = new MySQL(host, port, username, password, database);
-        } catch (Exception e) {
-            new MySqlErrorHandler().onInitialize();
-            throw new RuntimeException(e);
+        public MySqlConnectionHandler(String host, int port, String database, String username, String password,
+                        FileConfiguration config) {
+                try {
+                        if (config.getBoolean("hikaricp.enabled", true)) {
+                                Class.forName("com.zaxxer.hikari.HikariDataSource");
+                                this.hikariCPHandler = new HikariCPHandler(host, port, database, username, password,
+                                                config);
+                                Main.getInstance().getLogger()
+                                                .info("Using HikariCP connection pooling for better performance!");
+                        }
+                } catch (ClassNotFoundException e) {
+                        Main.getInstance().getLogger()
+                                        .warning("HikariCP is enabled but not found in classpath. Install HikariCP library to use connection pooling.");
+                        this.hikariCPHandler = null;
+                } catch (Exception e) {
+                        Main.getInstance().getLogger()
+                                        .warning("Failed to initialize HikariCP, falling back to default connection: "
+                                                        + e.getMessage());
+                        this.hikariCPHandler = null;
+                }
+                try {
+                        this.mySQL = new MySQL(host, port, username, password, database);
+                } catch (Exception e) {
+                        new MySqlErrorHandler().onInitialize();
+                        throw new RuntimeException(e);
+                }
+                try {
+                        mySqlManager = new MySqlManager(mySQL);
+                } catch (MySqlError e) {
+                        new MySqlErrorHandler().onManagerInitialize();
+                        throw new RuntimeException(e);
+                }
+
+                this.createTables();
+                this.mySqlDataManager = new MySqlDataManager(mySqlManager);
         }
-        try {
-            mySqlManager = new MySqlManager(mySQL);
-        } catch (MySqlError e) {
-            new MySqlErrorHandler().onManagerInitialize();
-            throw new RuntimeException(e);
+
+        private void createTables() {
+                try {
+                        mySqlManager.createTable(Main.TABLE_NAME_REGISTERED_PLAYERS,
+                                        MySqlManager.ColumnDefinition.varchar("uuid", 36),
+                                        MySqlManager.ColumnDefinition.text("timestamp"),
+                                        MySqlManager.ColumnDefinition.Boolean("online"),
+                                        MySqlManager.ColumnDefinition.Boolean("cracked"));
+                        mySqlManager.createTable(Main.TABLE_NAME_MIGRATION,
+                                        MySqlManager.ColumnDefinition.text("migration"),
+                                        MySqlManager.ColumnDefinition.Boolean("running_migration"),
+                                        MySqlManager.ColumnDefinition.text("timestamp"));
+
+                        mySqlManager.createTable(Main.TABLE_NAME_EFFECTS,
+                                        MySqlManager.ColumnDefinition.varchar("uuid", 36),
+                                        MySqlManager.ColumnDefinition.longText("effects"));
+                        mySqlManager.createTable(Main.TABLE_NAME_ADVANCEMENTS,
+                                        MySqlManager.ColumnDefinition.varchar("uuid", 36),
+                                        MySqlManager.ColumnDefinition.longText("advancements"));
+                        mySqlManager.createTable(Main.TABLE_NAME_STATS,
+                                        MySqlManager.ColumnDefinition.varchar("uuid", 36),
+                                        MySqlManager.ColumnDefinition.longText("stats"));
+                        mySqlManager.createTable(Main.TABLE_NAME_SELECTED_HOTBAR_SLOT,
+                                        MySqlManager.ColumnDefinition.varchar("uuid", 36),
+                                        MySqlManager.ColumnDefinition.integer("slot"));
+                        mySqlManager.createTable(Main.TABLE_NAME_SATURATION,
+                                        MySqlManager.ColumnDefinition.varchar("uuid", 36),
+                                        MySqlManager.ColumnDefinition.Float("saturation"),
+                                        MySqlManager.ColumnDefinition.integer("food_level"));
+
+                        mySqlManager.createTable(Main.TABLE_NAME_LOCATION,
+                                        MySqlManager.ColumnDefinition.varchar("uuid", 36),
+                                        MySqlManager.ColumnDefinition.text("world"),
+                                        MySqlManager.ColumnDefinition.doubLe("x"),
+                                        MySqlManager.ColumnDefinition.doubLe("y"),
+                                        MySqlManager.ColumnDefinition.doubLe("z"),
+                                        MySqlManager.ColumnDefinition.Float("yaw"),
+                                        MySqlManager.ColumnDefinition.Float("pitch"));
+
+                        mySqlManager.createTable(Main.TABLE_NAME_EXP,
+                                        MySqlManager.ColumnDefinition.varchar("uuid", 36),
+                                        MySqlManager.ColumnDefinition.integer("exp_level"),
+                                        MySqlManager.ColumnDefinition.Float("exp"));
+
+                        mySqlManager.createTable(Main.TABLE_NAME_GAMEMODE,
+                                        MySqlManager.ColumnDefinition.varchar("uuid", 36),
+                                        MySqlManager.ColumnDefinition.text("gamemode"));
+
+                        mySqlManager.createTable(Main.TABLE_NAME_INVENTORY,
+                                        MySqlManager.ColumnDefinition.varchar("uuid", 36),
+                                        MySqlManager.ColumnDefinition.longText("inventory"));
+
+                        mySqlManager.createTable(Main.TABLE_NAME_ARMOR,
+                                        MySqlManager.ColumnDefinition.varchar("uuid", 36),
+                                        MySqlManager.ColumnDefinition.longText("armor"));
+
+                        mySqlManager.createTable(Main.TABLE_NAME_ENDERCHEST,
+                                        MySqlManager.ColumnDefinition.varchar("uuid", 36),
+                                        MySqlManager.ColumnDefinition.longText("enderchest"));
+
+                        mySqlManager.createTable(Main.TABLE_NAME_HEALTH,
+                                        MySqlManager.ColumnDefinition.varchar("uuid", 36),
+                                        MySqlManager.ColumnDefinition.doubLe("health"),
+                                        MySqlManager.ColumnDefinition.doubLe("max_health"),
+                                        MySqlManager.ColumnDefinition.Boolean("health_scaled"),
+                                        MySqlManager.ColumnDefinition.doubLe("health_scale"));
+
+                        mySqlManager.createTable(Main.TABLE_NAME_MONEY,
+                                        MySqlManager.ColumnDefinition.varchar("uuid", 36),
+                                        MySqlManager.ColumnDefinition.doubLe("money"));
+                } catch (MySqlError e) {
+                        new MySqlErrorHandler().onTableCreate();
+                        throw new RuntimeException(e);
+                }
         }
 
-        this.createTables();
-        this.mySqlDataManager = new MySqlDataManager(mySqlManager);
-    }
-
-    private void createTables() {
-        try {
-            mySqlManager.createTable(Main.TABLE_NAME_REGISTERED_PLAYERS,
-                    MySqlManager.ColumnDefinition.varchar("uuid", 36),
-                    MySqlManager.ColumnDefinition.text("timestamp"),
-                    MySqlManager.ColumnDefinition.Boolean("online"),
-                    MySqlManager.ColumnDefinition.Boolean("cracked")
-            );
-            mySqlManager.createTable(Main.TABLE_NAME_MIGRATION,
-                    MySqlManager.ColumnDefinition.text("migration"),
-                    MySqlManager.ColumnDefinition.Boolean("running_migration"),
-                    MySqlManager.ColumnDefinition.text("timestamp")
-            );
-
-            mySqlManager.createTable(Main.TABLE_NAME_EFFECTS,
-                    MySqlManager.ColumnDefinition.varchar("uuid", 36),
-                    MySqlManager.ColumnDefinition.longText("effects")
-            );
-            mySqlManager.createTable(Main.TABLE_NAME_ADVANCEMENTS,
-                    MySqlManager.ColumnDefinition.varchar("uuid", 36),
-                    MySqlManager.ColumnDefinition.longText("advancements")
-            );
-            mySqlManager.createTable(Main.TABLE_NAME_STATS,
-                    MySqlManager.ColumnDefinition.varchar("uuid", 36),
-                    MySqlManager.ColumnDefinition.longText("stats")
-            );
-            mySqlManager.createTable(Main.TABLE_NAME_SELECTED_HOTBAR_SLOT,
-                    MySqlManager.ColumnDefinition.varchar("uuid", 36),
-                    MySqlManager.ColumnDefinition.integer("slot")
-            );
-            mySqlManager.createTable(Main.TABLE_NAME_SATURATION,
-                    MySqlManager.ColumnDefinition.varchar("uuid", 36),
-                    MySqlManager.ColumnDefinition.Float("saturation"),
-                    MySqlManager.ColumnDefinition.integer("food_level")
-            );
-
-            mySqlManager.createTable(Main.TABLE_NAME_LOCATION,
-                    MySqlManager.ColumnDefinition.varchar("uuid", 36),
-                    MySqlManager.ColumnDefinition.text("world"),
-                    MySqlManager.ColumnDefinition.doubLe("x"),
-                    MySqlManager.ColumnDefinition.doubLe("y"),
-                    MySqlManager.ColumnDefinition.doubLe("z"),
-                    MySqlManager.ColumnDefinition.Float("yaw"),
-                    MySqlManager.ColumnDefinition.Float("pitch")
-            );
-
-            mySqlManager.createTable(Main.TABLE_NAME_EXP,
-                    MySqlManager.ColumnDefinition.varchar("uuid", 36),
-                    MySqlManager.ColumnDefinition.integer("exp_level"),
-                    MySqlManager.ColumnDefinition.Float("exp")
-            );
-
-            mySqlManager.createTable(Main.TABLE_NAME_GAMEMODE,
-                    MySqlManager.ColumnDefinition.varchar("uuid", 36),
-                    MySqlManager.ColumnDefinition.text("gamemode")
-            );
-
-            mySqlManager.createTable(Main.TABLE_NAME_INVENTORY,
-                    MySqlManager.ColumnDefinition.varchar("uuid", 36),
-                    MySqlManager.ColumnDefinition.longText("inventory")
-            );
-
-            mySqlManager.createTable(Main.TABLE_NAME_ARMOR,
-                    MySqlManager.ColumnDefinition.varchar("uuid", 36),
-                    MySqlManager.ColumnDefinition.longText("armor")
-            );
-
-            mySqlManager.createTable(Main.TABLE_NAME_ENDERCHEST,
-                    MySqlManager.ColumnDefinition.varchar("uuid", 36),
-                    MySqlManager.ColumnDefinition.longText("enderchest")
-            );
-
-            mySqlManager.createTable(Main.TABLE_NAME_HEALTH,
-                    MySqlManager.ColumnDefinition.varchar("uuid", 36),
-                    MySqlManager.ColumnDefinition.doubLe("health"),
-                    MySqlManager.ColumnDefinition.doubLe("max_health"),
-                    MySqlManager.ColumnDefinition.Boolean("health_scaled"),
-                    MySqlManager.ColumnDefinition.doubLe("health_scale")
-            );
-
-            mySqlManager.createTable(Main.TABLE_NAME_MONEY,
-                    MySqlManager.ColumnDefinition.varchar("uuid", 36),
-                    MySqlManager.ColumnDefinition.doubLe("money")
-            );
-        } catch (MySqlError e) {
-            new MySqlErrorHandler().onTableCreate();
-            throw new RuntimeException(e);
+        public MySqlManager getManager() {
+                return mySqlManager;
         }
-    }
 
-    public MySqlManager getManager(){ return mySqlManager; }
-    public MySQL getMySQL(){ return this.mySQL; }
-    public MySqlDataManager getMySqlDataManager(){ return this.mySqlDataManager; }
+        public MySQL getMySQL() {
+                return this.mySQL;
+        }
+
+        public MySqlDataManager getMySqlDataManager() {
+                return this.mySqlDataManager;
+        }
+
+        public HikariCPHandler getHikariCP() {
+                return this.hikariCPHandler;
+        }
+
+        public boolean isHikariCPEnabled() {
+                return hikariCPHandler != null && hikariCPHandler.isEnabled();
+        }
+
+        public void closeConnections() {
+                if (hikariCPHandler != null) {
+                        hikariCPHandler.close();
+                }
+        }
 }

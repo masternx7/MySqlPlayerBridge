@@ -26,7 +26,7 @@ public class MPBCommand implements ServerCommand {
 
     @Override
     public void execute(CommandSender commandSender, String[] strings) {
-        if(this.adminPerm.isEmpty() || !commandSender.hasPermission(this.adminPerm)){
+        if (this.adminPerm.isEmpty() || !commandSender.hasPermission(this.adminPerm)) {
             commandSender.sendMessage(Chat.getMessage("permission-error"));
             return;
         }
@@ -34,13 +34,15 @@ public class MPBCommand implements ServerCommand {
         try {
             subCommandManager.executeIntern(commandSender, strings);
         } catch (SubCommandManagerException e) {
-            switch (e.getErrorType()){
+            switch (e.getErrorType()) {
                 case SubCommandManagerExceptionType.UNKNOWN_SUBCOMMAND -> {
-                    commandSender.sendMessage(Chat.getMessage("unknown-subcommand-error").replace("{subcommands}", e.getDetails()));
+                    commandSender.sendMessage(
+                            Chat.getMessage("unknown-subcommand-error").replace("{subcommands}", e.getDetails()));
                     break;
                 }
                 case SubCommandManagerExceptionType.NO_ARGS_ERROR -> {
-                    commandSender.sendMessage(Chat.getMessage("no-subcommand-error").replace("{subcommands}", e.getDetails()));
+                    commandSender.sendMessage(
+                            Chat.getMessage("no-subcommand-error").replace("{subcommands}", e.getDetails()));
                     break;
                 }
             }
@@ -49,7 +51,9 @@ public class MPBCommand implements ServerCommand {
 
     @Override
     public List<String> tabComplete(CommandSender commandSender, String[] strings) {
-        if(this.adminPerm.isEmpty() || !commandSender.hasPermission(this.adminPerm)){ return List.of(); }
+        if (this.adminPerm.isEmpty() || !commandSender.hasPermission(this.adminPerm)) {
+            return List.of();
+        }
         return subCommandManager.tabCompleteIntern(commandSender, strings);
     }
 }

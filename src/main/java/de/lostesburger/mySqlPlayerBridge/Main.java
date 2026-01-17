@@ -76,7 +76,6 @@ public final class Main extends JavaPlugin {
     public static String TABLE_NAME_HEALTH;
     public static String TABLE_NAME_MONEY;
 
-
     public static SerializationType serializationType = SerializationType.NBT_API;
 
     public static boolean DEBUG = false;
@@ -85,7 +84,8 @@ public final class Main extends JavaPlugin {
     public void onEnable() {
         instance = this;
 
-        this.getLogger().log(Level.WARNING, "Starting "+PLUGIN_NAME+" plugin v" + version);        serverType = Bukkit.getServer().getVersion();
+        this.getLogger().log(Level.WARNING, "Starting " + PLUGIN_NAME + " plugin v" + version);
+        serverType = Bukkit.getServer().getVersion();
         this.getLogger().log(Level.INFO, "Detected server type: " + serverType);
 
         if (Minecraft.isFolia()) {
@@ -117,7 +117,7 @@ public final class Main extends JavaPlugin {
         TABLE_NAME_EFFECTS = TABLE_NAME + "_potion_effects";
         TABLE_NAME_ADVANCEMENTS = TABLE_NAME + "_advancements";
         TABLE_NAME_STATS = TABLE_NAME + "_stats";
-        TABLE_NAME_SELECTED_HOTBAR_SLOT = TABLE_NAME  + "_selected_hotbar_slot";
+        TABLE_NAME_SELECTED_HOTBAR_SLOT = TABLE_NAME + "_selected_hotbar_slot";
         TABLE_NAME_SATURATION = TABLE_NAME + "_saturation";
         TABLE_NAME_LOCATION = TABLE_NAME + "_location";
         TABLE_NAME_EXP = TABLE_NAME + "_exp";
@@ -128,7 +128,7 @@ public final class Main extends JavaPlugin {
         TABLE_NAME_HEALTH = TABLE_NAME + "_health";
         TABLE_NAME_MONEY = TABLE_NAME + "_money";
 
-        BukkitYMLConfig ymlConfigMessages = new BukkitYMLConfig(this, "lang/"+LANGUAGE+".yml");
+        BukkitYMLConfig ymlConfigMessages = new BukkitYMLConfig(this, "lang/" + LANGUAGE + ".yml");
         messages = ymlConfigMessages.getConfig();
 
         this.getLogger().log(Level.INFO, "checking for configuration changes ...");
@@ -144,7 +144,8 @@ public final class Main extends JavaPlugin {
             this.getLogger().log(Level.INFO, "No configuration changes in config.yml found.");
         }
 
-        String msg2 = "configuration changes found! Please visit the lang/"+LANGUAGE+".yml. Make sure you don't have to change settings to resume error free usage";
+        String msg2 = "configuration changes found! Please visit the lang/" + LANGUAGE
+                + ".yml. Make sure you don't have to change settings to resume error free usage";
         if (ymlConfigMessages.getAccessor().hasChanges()) {
             this.getLogger().log(Level.WARNING, msg2);
             Scheduler.runLaterAsync(() -> {
@@ -152,7 +153,7 @@ public final class Main extends JavaPlugin {
                 Bukkit.broadcastMessage(PREFIX + msg2);
             }, 5 * 20, this);
         } else {
-            this.getLogger().log(Level.INFO, "No configuration changes in lang/"+LANGUAGE+".yml found.");
+            this.getLogger().log(Level.INFO, "No configuration changes in lang/" + LANGUAGE + ".yml found.");
         }
 
         /**
@@ -160,7 +161,8 @@ public final class Main extends JavaPlugin {
          */
         this.getLogger().log(Level.INFO, "Checking for updates ...");
         // New GitHubUpdateChecker with 403 rate-limit failsafe
-        new GitHubUpdateCheckerHandler(this, version, "https://github.com/Lostes-Burger/MySqlPlayerBridge", PREFIX, 30*60);
+        new GitHubUpdateCheckerHandler(this, version, "https://github.com/Lostes-Burger/MySqlPlayerBridge", PREFIX,
+                30 * 60);
 
         this.getLogger().log(Level.INFO, "Checking database Configuration...");
         if (!new DatabaseConfigCheck(mysqlConf).isSetup()) {
@@ -172,7 +174,6 @@ public final class Main extends JavaPlugin {
          * Modules
          */
         modulesManager = new ModulesManager();
-
 
         /**
          * NBT-API
@@ -199,7 +200,6 @@ public final class Main extends JavaPlugin {
             tryInitNBTSerializer();
         }
 
-
         /**
          * VaultAPI
          */
@@ -217,8 +217,8 @@ public final class Main extends JavaPlugin {
                 mysqlConf.getInt("port"),
                 mysqlConf.getString("database"),
                 mysqlConf.getString("user"),
-                mysqlConf.getString("password")
-        );
+                mysqlConf.getString("password"),
+                mysqlConf);
 
         /**
          * SyncModules
@@ -231,7 +231,6 @@ public final class Main extends JavaPlugin {
         this.getLogger().log(Level.INFO, "Checking for migrations...");
         mySqlMigrationHandler = new MySqlMigrationHandler();
 
-
         /**
          * Managers
          */
@@ -242,17 +241,24 @@ public final class Main extends JavaPlugin {
         });
     }
 
-    public static Plugin getInstance(){return instance;}
+    public static Plugin getInstance() {
+        return instance;
+    }
 
     @Override
     public void onDisable() {
-        this.getLogger().log(Level.WARNING, "Stopping "+PLUGIN_NAME+" plugin v"+version);
-        if(mySqlConnectionHandler != null){
+        this.getLogger().log(Level.WARNING, "Stopping " + PLUGIN_NAME + " plugin v" + version);
+        if (mySqlConnectionHandler != null) {
             mySqlConnectionHandler.getMySqlDataManager().saveAllOnlinePlayers();
         }
 
         this.getLogger().log(Level.INFO, "Closing MySql connection...");
-        if(mySqlConnectionHandler != null) {
+        if (mySqlConnectionHandler != null) {
+            // Close HikariCP pool if enabled
+            if (mySqlConnectionHandler.isHikariCPEnabled()) {
+                mySqlConnectionHandler.closeConnections();
+                this.getLogger().log(Level.INFO, "HikariCP connection pool closed.");
+            }
             mySqlConnectionHandler.getMySQL().closeConnection();
         }
 

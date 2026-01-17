@@ -8,3 +8,15 @@ password: ""
 
 # If you change this with a full table of player data a new Table will be created and all data ignored (not deleted)!
 main-table-name: "player_data"
+
+# HikariCP Connection Pool Settings (recommended for high-traffic servers)
+hikaricp:
+  enabled: true
+  # (recommended: 10-20 for high load)
+  maximum-pool-size: 10 
+  minimum-idle: 5
+  connection-timeout: 30000
+  max-lifetime: 1800000
+  idle-timeout: 600000
+  # Connection test query (leave as is for MySQL/MariaDB)
+  connection-test-query: "SELECT 1"
