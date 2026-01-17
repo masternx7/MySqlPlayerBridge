@@ -42,7 +42,17 @@ public class MySqlDataManager {
     public void savePlayerData(Player player, boolean async, boolean criticalSave) {
         UUID uuid = player.getUniqueId();
 
-        long lockTimeout = async ? 3000 : (criticalSave ? 10000 : 5000);
+        if (!criticalSave) {
+            long timeSinceLastSave = PlayerSyncLockManager.getTimeSinceLastSave(uuid);
+            if (timeSinceLastSave < PlayerSyncLockManager.MIN_SAVE_INTERVAL_MS) {
+                if (Main.DEBUG) {
+                    System.out.println("[MySqlDataManager] Skipping save (too soon): " + player.getName());
+                }
+                return;
+            }
+        }
+
+        long lockTimeout = criticalSave ? 30000 : 15000;
         if (!PlayerSyncLockManager.tryLock(uuid, lockTimeout)) {
             if (Main.DEBUG) {
                 System.out.println("[MySqlDataManager] Failed to acquire lock for save: " + player.getName());
@@ -58,66 +68,29 @@ public class MySqlDataManager {
                 return;
             }
 
-            long timeSinceLastSave = PlayerSyncLockManager.getTimeSinceLastSave(uuid);
-            if (timeSinceLastSave < PlayerSyncLockManager.MIN_SAVE_INTERVAL_MS) {
-                if (Main.DEBUG) {
-                    System.out.println("[MySqlDataManager] Skipping save (too soon): " + player.getName());
-                }
-                return;
-            }
-
-            if (async) {
-                PlayerSyncLockManager.incrementAsyncOperation(uuid);
-            }
-
             PlayerSyncLockManager.setState(uuid, PlayerSyncState.SAVING);
 
             if (Main.DEBUG) {
-                System.out.println("[MySqlDataManager] Starting " + (async ? "ASYNC" : "SYNC") + " save for player: "
-                        + player.getName());
+                System.out.println("[MySqlDataManager] Starting save for player: " + player.getName());
             }
 
-            if (async) {
-                Scheduler.runAsync(() -> {
-                    try {
-                        performSaveOperations(player);
-                        PlayerSyncLockManager.setState(uuid, PlayerSyncState.SAVED);
-                        PlayerSyncLockManager.setState(uuid, PlayerSyncState.CONFIRMED);
-                        if (Main.DEBUG) {
-                            System.out.println("[MySqlDataManager] ASYNC save confirmed for: " + player.getName());
-                        }
-                    } catch (Exception e) {
-                        System.err.println("[MySqlDataManager] ASYNC save error for " + player.getName());
-                        e.printStackTrace();
-                        PlayerSyncLockManager.setState(uuid, PlayerSyncState.IDLE);
-                    } finally {
-                        PlayerSyncLockManager.decrementAsyncOperation(uuid);
-                        PlayerSyncLockManager.unlock(uuid);
-                    }
-                }, Main.getInstance());
-            } else {
-                try {
-                    performSaveOperations(player);
-                    PlayerSyncLockManager.setState(uuid, PlayerSyncState.SAVED);
-                    PlayerSyncLockManager.setState(uuid, PlayerSyncState.CONFIRMED);
-                    if (Main.DEBUG) {
-                        System.out.println("[MySqlDataManager] SYNC save confirmed for: " + player.getName());
-                    }
-                } catch (Exception e) {
-                    if (Main.DEBUG) {
-                        System.err.println("[MySqlDataManager] Error saving player data: " + player.getName());
-                        e.printStackTrace();
-                    }
-                    PlayerSyncLockManager.setState(uuid, PlayerSyncState.IDLE);
-                    throw e;
-                } finally {
-                    PlayerSyncLockManager.setState(uuid, PlayerSyncState.IDLE);
+            try {
+                performSaveOperations(player);
+                PlayerSyncLockManager.setState(uuid, PlayerSyncState.SAVED);
+                PlayerSyncLockManager.setState(uuid, PlayerSyncState.CONFIRMED);
+                if (Main.DEBUG) {
+                    System.out.println("[MySqlDataManager] Save confirmed for: " + player.getName());
                 }
+            } catch (Exception e) {
+                System.err.println("[MySqlDataManager] Save error for " + player.getName());
+                e.printStackTrace();
+                PlayerSyncLockManager.setState(uuid, PlayerSyncState.IDLE);
+                throw e;
+            } finally {
+                PlayerSyncLockManager.setState(uuid, PlayerSyncState.IDLE);
             }
         } finally {
-            if (!async) {
-                PlayerSyncLockManager.unlock(uuid);
-            }
+            PlayerSyncLockManager.unlock(uuid);
         }
     }
 
@@ -144,14 +117,12 @@ public class MySqlDataManager {
     public void applyDataToPlayer(Player player) {
         UUID uuid = player.getUniqueId();
 
-        if (!PlayerSyncLockManager.tryLock(uuid)) {
+        if (!PlayerSyncLockManager.tryLock(uuid, 15000)) {
             if (Main.DEBUG) {
                 System.out.println("[MySqlDataManager] Failed to acquire lock for applying data: " + player.getName());
             }
             return;
         }
-
-        PlayerSyncLockManager.incrementAsyncOperation(uuid);
 
         try {
             PlayerSyncLockManager.setState(uuid, PlayerSyncState.LOADING);
@@ -188,7 +159,6 @@ public class MySqlDataManager {
             throw e;
         } finally {
             PlayerSyncLockManager.setState(uuid, PlayerSyncState.IDLE);
-            PlayerSyncLockManager.decrementAsyncOperation(uuid);
             PlayerSyncLockManager.unlock(uuid);
         }
     }

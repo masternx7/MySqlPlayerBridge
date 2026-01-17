@@ -35,12 +35,6 @@ public class PlayerBridgeManager implements Listener {
                     System.out.println("[PlayerBridge] Waiting for completion before loading: " + player.getName());
                 }
                 PlayerSyncLockManager.waitForCompletion(uuid, 30000);
-
-                if (PlayerSyncLockManager.hasIncompleteAsyncOperations(uuid)) {
-                    System.err
-                            .println("[PlayerBridge] WARNING: Incomplete operations detected for " + player.getName());
-                    PlayerSyncLockManager.waitForSaveConfirmation(uuid, 10000);
-                }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 System.err.println("[PlayerBridge] Interrupted while waiting for " + player.getName());
@@ -67,34 +61,17 @@ public class PlayerBridgeManager implements Listener {
         UUID uuid = player.getUniqueId();
 
         if (Main.DEBUG) {
-            System.out.println("[PlayerBridge] Player leaving, async save: " + player.getName());
+            System.out.println("[PlayerBridge] Player leaving, critical save: " + player.getName());
         }
 
-        Scheduler.runAsync(() -> {
-            try {
-                this.mySqlDataManager.savePlayerDataCritical(player);
-
-                if (PlayerSyncLockManager.hasIncompleteAsyncOperations(uuid)) {
-                    if (Main.DEBUG) {
-                        Main.getInstance().getLogger()
-                                .info("[PlayerBridge] Waiting for incomplete operations: " + player.getName());
-                    }
-                    try {
-                        PlayerSyncLockManager.waitForSaveConfirmation(uuid, 5000);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        Main.getInstance().getLogger()
-                                .warning("[PlayerBridge] Interrupted while waiting for save confirmation: "
-                                        + player.getName());
-                    }
-                }
-            } finally {
-                PlayerSyncLockManager.cleanup(uuid);
-                if (Main.DEBUG) {
-                    System.out.println("[PlayerBridge] Cleanup completed: " + player.getName());
-                }
+        try {
+            this.mySqlDataManager.savePlayerDataCritical(player);
+        } finally {
+            PlayerSyncLockManager.cleanup(uuid);
+            if (Main.DEBUG) {
+                System.out.println("[PlayerBridge] Cleanup completed: " + player.getName());
             }
-        }, Main.getInstance());
+        }
     }
 
     private void startAutoSyncTask() {
